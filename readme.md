@@ -1,4 +1,4 @@
-**C'è un branch di questo repository con la UI rifatta a fine 2025, ma abbandondata a favore di un'app windows completamente nuova fatta in C# e framework WPF**
+**C'è un branch di questo repository con la UI rifatta a fine 2025, ma abbandonata a favore di un'app Windows completamente nuova fatta in C# e framework WPF**
 
 # Inventario — analisi acquisti da fatture elettroniche XML
 
