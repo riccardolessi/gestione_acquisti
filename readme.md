@@ -1,110 +1,141 @@
-# Dashboard acquisti — redesign dell'interfaccia
+# Purchasing dashboard — interface redesign
 
-Redesign dell'interfaccia di [Inventario](../../tree/main): stessa base dati, nuova UI. Trasforma le tabelle di consultazione in una dashboard di analisi, con l'andamento mensile della spesa e una scheda per prodotto che mostra prezzo medio, quantità e storico degli acquisti.
+Interface redesign of Inventario: same database, new UI. It turns the
+consultation tables into an analysis dashboard, with monthly spending trends and
+a per-product page showing average price, quantity and purchase history.
 
-> **Branch separato, non integrato in `main`.**
-> Questo ramo contiene solo il livello di presentazione: legge lo stesso database di `main` ma **non include l'import delle fatture XML**, che resta sul ramo principale. Il refactoring non è mai stato completato e i due rami non sono stati unificati — i limiti sono documentati sotto.
+Separate branch, not merged into main. This branch contains only the
+presentation layer: it reads the same database as main, but does not include the
+XML invoice import, which stays on the main branch. The refactoring was never
+finished and the two branches were never unified — the limitations are
+documented below.
 
----
+## What's in here
 
-## Cosa contiene
+**Dashboard** — month-by-month spending chart, with a year selector populated
+from the years actually present in the database, and the annual total
+highlighted.
 
-**Dashboard** — grafico dell'andamento della spesa mese per mese, con selettore dell'anno popolato dagli anni effettivamente presenti a database e totale annuo in evidenza.
+**Product search** — search by description or item code, with the associated
+supplier.
 
-**Ricerca prodotti** — ricerca per descrizione o codice articolo, con il fornitore associato.
+**Product page** — total quantity purchased, weighted average price, total
+spending and the full purchase history, filterable by date range.
 
-**Scheda prodotto** — quantità totale acquistata, prezzo medio ponderato, spesa complessiva e storico completo degli acquisti, filtrabile per intervallo di date.
+## Relationship to the main branch
 
----
+| | main | this branch |
+| --- | --- | --- |
+| XML invoice import | yes | no |
+| Data consultation | Bootstrap tables | dashboard with charts |
+| DB connection | `config.ini` | credentials in `db.php` |
+| Database schema | the same (`schema.sql` on main) | |
 
-## Rapporto con il ramo principale
-
-| | `main` | questo ramo |
-|---|---|---|
-| Import fatture XML | sì | no |
-| Consultazione dati | tabelle Bootstrap | dashboard con grafici |
-| Connessione DB | `config.ini` | credenziali in `db.php` |
-| Schema database | lo stesso (`schema.sql` su `main`) | |
-
-Per avere dei dati da visualizzare serve prima eseguire l'import dal ramo `main`: questo ramo è di sola lettura.
-
----
+To have any data to display, you first need to run the import from the main
+branch: this branch is read-only.
 
 ## Stack
 
-- PHP puro, senza framework né dipendenze Composer
+- Plain PHP, no framework and no Composer dependencies
 - MySQL 8
-- [Chart.js](https://www.chartjs.org/) da CDN per il grafico
-- CSS scritto a mano su design token (`:root` con 13 variabili), tema scuro, effetto vetro sull'header
-- Font Awesome e Inter da CDN
+- Chart.js from a CDN for the chart
+- Hand-written CSS on design tokens (`:root` with 13 variables), dark theme,
+  glass effect on the header
+- Font Awesome and Inter from a CDN
 
-Nessun build step: si apre e funziona.
+No build step: open it and it works.
 
----
-
-## Struttura
+## Layout
 
 ```
-├── index.php              dashboard e grafico annuale
-├── search.php             ricerca prodotti
-├── product_details.php    scheda prodotto e storico acquisti
-├── db.php                 connessione al database
-├── includes/              header e footer condivisi
-└── css/style.css          design system (289 righe)
+├── index.php              dashboard and yearly chart
+├── search.php             product search
+├── product_details.php    product page and purchase history
+├── db.php                 database connection
+├── includes/              shared header and footer
+└── css/style.css          design system (289 lines)
 ```
 
----
+## Installation
 
-## Installazione
+Load the schema and import the invoices from the main branch, then configure the
+credentials in `db.php` and open `index.php`.
 
-Caricare lo schema e importare le fatture dal ramo `main`, poi configurare le credenziali in `db.php` e aprire `index.php`.
+## Known limitations and what I would do differently today
 
----
+### The biggest limitation: comparing the same product across suppliers
 
-## Limiti noti e cosa rifarei oggi
+On the product page, the "Supplier" column does not come from the individual
+purchase: it is copied from the product itself (`product_details.php`). The join
+`movimenti` → `documenti` → `fornitori` (movements → documents → suppliers),
+which would tell you who you bought from on that occasion, is never performed.
 
-### Il limite più importante: confrontare lo stesso prodotto tra fornitori
+What ends up on screen is correct, but only for an indirect reason: during
+import, products are deduplicated on description + item code + supplier, so each
+product already belongs to a single supplier. And that is exactly where the
+underlying problem lies: the same item bought from three suppliers becomes three
+separate rows in `prodotti`, and the dashboard cannot compare their prices —
+which is the whole reason the application exists. It shows up clearly in the
+real data: roughly 1,900 invoices produced more than 23,000 products.
 
-Nella scheda prodotto la colonna "Fornitore" **non viene dal singolo acquisto**: è copiata dal prodotto (product_details.php). Il join movimenti → documenti → fornitori, che direbbe da chi hai comprato *quella volta*, non viene mai fatto.
+Fixing it means changing the data model, not the UI: separating the product
+record from its link to the supplier, and reading the supplier from the
+movement's document.
 
-Il risultato a schermo è corretto, ma solo per un motivo indiretto: in fase di import i prodotti vengono deduplicati su descrizione + codice articolo + fornitore, quindi ogni prodotto appartiene già a un solo fornitore. Ed è proprio lì il problema di fondo: **lo stesso articolo acquistato da tre fornitori diventa tre righe distinte in prodotti**, e la dashboard non può confrontarne i prezzi — che sarebbe il motivo per cui l'applicazione esiste. Nei dati reali questo si vede bene: circa 1.900 fatture hanno generato oltre 23.000 prodotti.
+The limitation of reading products from electronic invoices is that the same
+product bought from different suppliers comes with different product codes and
+descriptions (often the descriptions differ a great deal), so they cannot be
+merged automatically. The only way to verify that the same product was bought
+from more than one supplier is the barcode, which not every supplier includes on
+the invoice and which this app does not handle.
 
-Risolverlo richiede di cambiare il modello dati, non la UI: separare l'anagrafica di prodotto dal legame con il fornitore, e leggere il fornitore dal documento del movimento.
+### The CSS is only half applied
 
-La limitazione di leggere i prodotti dalle fatture elettroniche è che lo stesso prodotto acquistato da più fornitori ha codici prodotto e descrizioni diverse (spesso le descrizioni sono molto diverse), quindi non è possibile unirli in maniera automatizzata. L'unico modo per verificare che uno stesso prodotto è stato acquistato da più fornitori è usando il codice a barre, che però non viene riportato in fattura da tutti i fornitori e non viene gestito da quest'app.
+The stylesheet defines a coherent design system — colour tokens, spacing,
+`.card`, `.stat-card` and `.dashboard-grid` classes — but 31 inline
+`style="..."` attributes remain in the pages, written while I was sorting out
+the layout and never moved into the CSS.
 
-### Il CSS è applicato a metà
+Above all: there is not a single media query, so the layout does not adapt on
+narrow screens. For a dashboard that is the most damaging flaw, and also the
+quickest to fix. (The app only ran on my own computer, so this flaw didn't
+matter at the time.)
 
-Il foglio di stile definisce un design system coerente — token di colore, spaziature, classi `.card`, `.stat-card`, `.dashboard-grid` — ma restano **31 attributi `style="..."` inline** nelle pagine, scritti mentre sistemavo il layout e mai spostati nel CSS.
+### Other known flaws
 
-Soprattutto: **non c'è nessuna media query**, quindi su schermi stretti il layout non si adatta. Per una dashboard è il difetto che pesa di più, ed è anche il più veloce da correggere (L'app girava solo sul mio computer quindi questo difetto non era importante).
+- `db.php` has the credentials hard-coded: a step backwards from the
+  `config.ini` on the main branch, and it needs to be brought into line.
+- The chart is configured as `type: 'bar'`, but the dataset still carries
+  `tension`, `fill` and `pointRadius` — line-chart options that a bar chart
+  ignores: leftovers from a change of chart type that was never cleaned up.
+- The footer says "All rights reserved" in an interface that is entirely in
+  Italian.
+- In `product_details.php`, the "no movements" row uses `colspan="6"` on a
+  five-column table.
+- No authentication: like the main branch, the application was built for
+  personal use on localhost. Exposed on a network, it would show the entire
+  purchase history to anyone.
+- The dashboard totals are only as accurate as the import: the price conversion
+  bugs documented on main are reflected here, because this branch only reads.
 
-### Altri difetti noti
+### What I would change structurally
 
-- `db.php` ha le credenziali scritte nel codice: è un passo indietro rispetto al `config.ini` del ramo principale, e va allineato.
-- Il grafico è configurato come `type: 'bar'` ma il dataset porta ancora `tension`, `fill` e `pointRadius`, opzioni da grafico a linee che su un istogramma vengono ignorate: residui di un cambio di tipo mai ripulito.
-- Il footer dice "All rights reserved" in un'interfaccia interamente in italiano.
-- In `product_details.php` la riga "nessun movimento" usa `colspan="6"` su una tabella di cinque colonne.
-- **Nessuna autenticazione**: come il ramo principale, l'applicazione è nata per uso personale su `localhost`. Esposta in rete, mostrerebbe l'intero storico acquisti a chiunque.
-- I totali della dashboard sono accurati quanto lo è l'import: i bug di conversione dei prezzi documentati su `main` si riflettono qui, perché questo ramo si limita a leggere.
+- The queries live inside the pages. Every file mixes data access, calculations
+  and HTML. The main branch had already introduced repositories: this UI should
+  have been built on top of those, not alongside them.
+- No pagination: search stops at a fixed `LIMIT 50`, with no way to see the
+  results beyond that.
+- No error handling: if the database doesn't respond, the page dies with a
+  system error instead of a comprehensible message.
 
-### Cosa cambierei a livello di struttura
+## Ideas never developed
 
-- **Le query stanno dentro le pagine.** Ogni file mescola accesso ai dati, calcoli e HTML. Il ramo principale aveva già introdotto i repository: questa UI andava costruita sopra quelli, non a fianco.
-- **Nessuna paginazione**: la ricerca si ferma a `LIMIT 50` fisso, senza modo di vedere i risultati successivi.
-- **Nessuna gestione degli errori**: se il database non risponde, la pagina muore con l'errore di sistema invece di un messaggio comprensibile.
+- Price comparison for the same product across different suppliers (requires the
+  data model change described above)
+- Flagging price increases relative to the previous purchase
+- CSV export of the filtered history
+- Unification with the main branch into a single application
 
----
-
-## Idee non sviluppate
-
-- Confronto dei prezzi dello stesso prodotto tra fornitori diversi (richiede la modifica al modello dati descritta sopra)
-- Segnalazione degli aumenti di prezzo rispetto all'acquisto precedente
-- Esportazione in CSV dello storico filtrato
-- Unificazione con il ramo `main` in un'unica applicazione
-
----
-
-## Licenza
+## License
 
 MIT
