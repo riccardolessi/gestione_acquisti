@@ -1,163 +1,111 @@
-**C'è un branch di questo repository con la UI rifatta a fine 2025, ma abbandonata a favore di un'app Windows completamente nuova fatta in C# e framework WPF**
+# Purchases dashboard — interface redesign
 
-# Inventario — analisi acquisti da fatture elettroniche XML
+Redesign of the [Inventario](../../tree/main) interface: same database, new UI. Turns the browsing tables into an analytics dashboard, with monthly spending trends and a per-product view showing average price, quantity, and purchase history.
 
-Web app in PHP che importa fatture elettroniche (XML, formato SDI/FatturaPA) e ricostruisce lo storico degli acquisti: chi ti ha venduto cosa, a che prezzo, e come quel prezzo è cambiato nel tempo.
-
-Nasce da un'esigenza reale: capire l'andamento dei prezzi d'acquisto senza reinserire a mano centinaia di righe di fattura.
-
-> **Stato: progetto archiviato, non mantenuto.**
-> Sviluppato nel 2023-2024 per uso personale in locale (MAMP). Contiene parti incomplete e bug noti, documentati onestamente più sotto nella sezione [Limiti noti](#limiti-noti-e-cosa-rifarei-oggi). È pubblicato come portfolio, non come software pronto all'uso.
+> **Separate branch, not merged into `main`.**
+> This branch contains only the presentation layer: it reads the same database as `main` but **does not include XML invoice import**, which stays on the main branch. The refactor was never completed and the two branches were never unified — the limitations are documented below.
 
 ---
 
-## Parsing delle fatture
+## What it contains
 
-La fattura elettronica italiana è un XML con struttura profonda e molti campi opzionali. I punti che l'app deve gestire:
+**Dashboard** — month-by-month spending trend chart, with a year selector populated from the years actually present in the database and the annual total highlighted.
 
-- il **prezzo unitario reale** non è `PrezzoUnitario`: quello è il listino. Il prezzo effettivamente pagato è `PrezzoTotale / Quantita`, perché sconti e maggiorazioni vivono in un blocco separato;
-- il `CodiceArticolo` è opzionale e i fornitori lo popolano in modo incoerente;
-- il `CodiceFiscale` del cedente può mancare: in quel caso si usa la partita IVA come fallback;
-- le righe di fattura non sono solo prodotti — contengono trasporto, incasso, riferimenti DDT. Vengono filtrate con una regex prima dell'inserimento;
-- la stessa fattura non deve essere importabile due volte: la deduplica avviene sulla tripla `(fornitore, numero_documento, data_documento)`.
+**Product search** — search by description or item code, with the associated supplier.
+
+**Product page** — total quantity purchased, weighted average price, total spend, and full purchase history, filterable by date range.
 
 ---
 
-## Caratteristiche
+## Relationship to the main branch
 
-- Import massivo di file XML da cartella
-- Riconoscimento e deduplica di fornitori, documenti e prodotti (`getOrCreate`)
-- Normalizzazione in 4 tabelle relazionali invece di una tabella piatta
-- Ricerca prodotti con filtro per fornitore e per anno
-- Selezione multipla di prodotti e confronto dei relativi movimenti d'acquisto
+| | `main` | this branch |
+|---|---|---|
+| XML invoice import | yes | no |
+| Data browsing | Bootstrap tables | dashboard with charts |
+| DB connection | `config.ini` | credentials in `db.php` |
+| Database schema | same (`schema.sql` on `main`) | |
 
----
-
-## Flusso dell'applicazione
-
-```
-File XML in uploads/
-        ↓
-ImportaFatture  →  itera i file della cartella
-        ↓
-Fattura::importaFattura()
-        ↓
-   ┌────────────────┬──────────────────┬─────────────────┐
-   ↓                ↓                  ↓                 ↓
-Anagrafica     Documento          Prodotto          Movimenti
-getOrCreate    getOrCreate        getOrCreate       INSERT riga
-(fornitori)    (deduplica ft.)    (prodotti)        (storico prezzi)
-        ↓
-Ricerca prodotti  →  selezione multipla  →  storico movimenti
-```
-
----
-
-## Struttura
-
-```
-├── api/                    endpoint JSON (ricerca prodotti)
-├── assets/js/              frontend vanilla JS, fetch + DOM
-├── config/                 singleton di connessione (vedi Limiti noti)
-├── lib/                    dominio: parsing XML e import
-├── partials/               header e footer condivisi
-├── repositories/           accesso ai dati con prepared statement
-├── views/                  pagine della UI
-└── db.php                  connessione legacy, ancora in uso
-```
+To have data to display, you first need to run the import from the `main` branch: this branch is read-only.
 
 ---
 
 ## Stack
 
-- PHP 7.4+ (sviluppato su MAMP)
+- Plain PHP, no framework or Composer dependencies
 - MySQL 8
-- Apache
-- Bootstrap 5 da CDN, JavaScript vanilla (nessun build step, nessuna dipendenza Composer)
+- [Chart.js](https://www.chartjs.org/) from CDN for the chart
+- Hand-written CSS on design tokens (`:root` with 13 variables), dark theme, glass effect on the header
+- Font Awesome and Inter from CDN
+
+No build step: it just opens and works.
 
 ---
 
-## Installazione
+## Structure
 
-```bash
-git clone https://github.com/<utente>/<repo>.git
+```
+├── index.php              dashboard and yearly chart
+├── search.php             product search
+├── product_details.php    product page and purchase history
+├── db.php                 database connection
+├── includes/              shared header and footer
+└── css/style.css          design system (289 lines)
 ```
 
-Copiare la configurazione di esempio e compilarla:
+---
 
-```bash
-cp config.ini.example config.ini
-```
+## Installation
 
-```ini
-DB_HOST = localhost
-DB_USER = root
-DB_PASS = root
-DB_NAME = inventario
-```
-
-Creare il database e caricare la struttura:
-
-```bash
-mysql -uroot -proot inventario < schema.sql
-```
-
-Creare la cartella `uploads/`, copiarci dentro i file XML e aprire `inserisci.php` per lanciare l'import.
+Load the schema and import the invoices from the `main` branch, then configure the credentials in `db.php` and open `index.php`.
 
 ---
 
-## Dati
+## Known limitations and what I'd redo today
 
-Lo schema è normalizzato su quattro tabelle: `fornitori` → `documenti` → `movimenti` ← `prodotti`.
-Un *movimento* è una riga di fattura: lega un prodotto al documento da cui proviene, con prezzo, quantità e data.
+### The most important limitation: comparing the same product across suppliers
 
-L'applicazione è stata usata su un archivio reale di circa **1.900 fatture**, da cui sono stati estratti **~23.000 prodotti** e **~49.000 movimenti d'acquisto**.
+In the product page, the "Supplier" column **does not come from the individual purchase**: it's copied from the product (product_details.php). The join movements → documents → suppliers, which would tell you who you bought *that particular time* from, is never done.
 
----
+The result on screen is correct, but only for an indirect reason: during import, products are deduplicated by description + item code + supplier, so each product already belongs to a single supplier. And that's exactly the underlying problem: **the same item bought from three suppliers becomes three distinct rows in products**, and the dashboard can't compare their prices — which is the very reason the application exists. This shows up clearly in the real data: roughly 1,900 invoices generated over 23,000 products.
 
-## Limiti noti e cosa rifarei oggi
+Fixing this requires changing the data model, not the UI: separating the product master data from the supplier relationship, and reading the supplier from the movement's document.
 
-Questa sezione è volutamente dettagliata: il codice è pubblicato com'era quando ho smesso di lavorarci, e mi interessa mostrare che oggi so dove sono i problemi.
+The limitation of reading products from electronic invoices is that the same product purchased from multiple suppliers has different product codes and descriptions (often the descriptions are very different), so they can't be merged automatically. The only way to verify that the same product was purchased from multiple suppliers is via barcode, which however isn't reported on the invoice by all suppliers and isn't handled by this app.
 
-### Scelte consapevoli, legate all'uso personale
+### The CSS is only half applied
 
-- **Nessuna autenticazione.** L'app girava su `localhost` in MAMP, utente singolo, mai esposta in rete. Per un deploy reale servirebbe come minimo login con sessioni e password hashate, oltre a protezione CSRF sulle azioni di scrittura.
-- **Nessun framework.** All'epoca non ero riuscito a configurare Laravel sull'ambiente locale e sono andato avanti in PHP puro, senza dipendenze esterne. Col senno di poi il problema era la configurazione dell'ambiente, non il framework — ma scrivere a mano connessione, query e struttura mi ha costretto a capire prepared statement, escaping e separazione delle responsabilità, ed è il motivo per cui la seconda iterazione introduce i repository. Oggi lo imposterei su Laravel, soprattutto per avere le migrazioni versionate.
+The stylesheet defines a coherent design system — color tokens, spacing, `.card`, `.stat-card`, `.dashboard-grid` classes — but **31 inline `style="..."` attributes** remain in the pages, written while fixing up the layout and never moved into the CSS.
 
-### Refactoring lasciato a metà
+Most importantly: **there is no media query at all**, so the layout doesn't adapt on narrow screens. For a dashboard this is the most impactful flaw, and also the fastest to fix (the app only ran on my own computer, so this flaw didn't matter at the time).
 
-A metà sviluppo ho riorganizzato l'accesso ai dati verso il repository pattern, ma il refactoring non è mai stato portato a termine. Si vede:
+### Other known flaws
 
-- in `lib/` convivono due generazioni della stessa logica: `fattura.php`, `documento.php`, `anagrafica.php` e le rispettive `*2.php`. Solo le seconde sono usate; le prime sono codice morto e vanno cancellate.
-- `config/database.php` implementa un singleton di connessione ma **non funziona e non è mai chiamato**: `$config` è definito fuori dalla classe e letto dentro un metodo statico, dove non è in scope, e le chiavi lette (`host`, `user`) non corrispondono a quelle di `config.ini` (`DB_HOST`, `DB_USER`). Tutta l'app usa ancora la connessione globale di `db.php`.
+- `db.php` has credentials hardcoded: a step backward compared to the `config.ini` on the main branch, and needs to be aligned.
+- The chart is configured as `type: 'bar'` but the dataset still carries `tension`, `fill`, and `pointRadius`, options from line charts that are ignored on a bar chart: leftovers from a chart-type change that was never cleaned up.
+- The footer says "All rights reserved" on an interface that's entirely in Italian.
+- In `product_details.php`, the "no movements" row uses `colspan="6"` on a five-column table.
+- **No authentication**: like the main branch, the application was built for personal use on `localhost`. Exposed on a network, it would show the entire purchase history to anyone.
+- The dashboard totals are only as accurate as the import: the price-conversion bugs documented on `main` carry over here, since this branch only reads the data.
 
-### Bug noti, non corretti
+### What I'd change structurally
 
-- `lib/fattura2.php` — il prezzo unitario passa da `number_format()`, che inserisce la virgola come separatore delle migliaia; bindato poi come `double`, un prezzo di 1234.57 viene salvato come 1.0. Corruzione silenziosa sugli importi a quattro cifre.
-- `lib/fattura2.php` — `commit()` viene chiamato senza `begin_transaction()`: con autocommit attivo non è una transazione, e un import interrotto lascia dati parziali.
-- `api/movimenti/search.php` — endpoint non funzionante: usa il repository sbagliato e chiama `search()` senza l'argomento obbligatorio `anno`.
-- `risultati.php` — è l'unica view rimasta senza `htmlspecialchars()` sull'output.
-- La voce "Inserisci dati" della navbar punta a `#`: la UI non è mai stata completata.
-
-### Cosa cambierei a livello di struttura
-
-- **Nessun indice e nessun vincolo di integrità.** Lo schema ha solo le chiavi primarie: `movimenti.id_prodotto`, `prodotti.id_fornitore` e le colonne di lookup dei documenti non sono indicizzate, quindi ogni ricerca fa una scansione completa (su 49.000 movimenti si sente, e l'import esegue una SELECT per ogni riga di fattura). Mancano anche le foreign key e gli indici UNIQUE su `fornitori.partita_iva` e sulla tripla che identifica un documento: **la deduplica è garantita solo dal codice PHP**, non dal database. È la prima cosa che sistemerei.
-- **Tipi di colonna approssimativi.** `denominazione`, `partita_iva` e `descrizione` sono `TEXT` dove basterebbe `VARCHAR` (e `TEXT` non è indicizzabile senza prefisso); i prezzi sono `DOUBLE` invece di `DECIMAL(10,2)`, che è il tipo corretto per il denaro. Resta anche una colonna `descrizione aggiuntiva` — con uno spazio nel nome — mai usata dal codice.
-- **Zero test.** Il parsing XML è logica pura con input deterministico: è esattamente il caso in cui i test unitari costano poco e valgono molto.
-- **Percorsi relativi fragili.** `require_once('db.php')` e `uploads/` dipendono dalla working directory, quindi lo stesso file si comporta in modo diverso a seconda di dove viene incluso. Servirebbe `__DIR__` ovunque, o un front controller unico.
-- **Import sincrono e bloccante.** Su molte fatture l'import gira dentro la richiesta HTTP, senza barra di avanzamento e senza ripresa in caso di errore. Andrebbe spostato in un comando CLI.
+- **Queries live inside the pages.** Every file mixes data access, calculations, and HTML. The main branch had already introduced repositories: this UI should have been built on top of those, not alongside them.
+- **No pagination**: search is capped at a fixed `LIMIT 50`, with no way to see further results.
+- **No error handling**: if the database doesn't respond, the page dies with a system error instead of a readable message.
 
 ---
 
-## Roadmap (non sviluppata)
+## Unimplemented ideas
 
-- [ ] Completare il refactoring ed eliminare le classi duplicate in `lib/`
-- [ ] Completare la UI (pagina di inserimento, impostazioni)
-- [ ] Adottare davvero il repository pattern e il singleton di connessione
-- [ ] Grafico dell'andamento dei prezzi nel tempo per prodotto
+- Comparing prices of the same product across different suppliers (requires the data model change described above)
+- Flagging price increases compared to the previous purchase
+- CSV export of the filtered history
+- Unifying with the `main` branch into a single application
 
 ---
 
-## Licenza
+## License
 
 MIT
+
